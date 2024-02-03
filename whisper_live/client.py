@@ -114,7 +114,8 @@ class Client:
         self.model = model
         self.server_error = False
         self.srt_file_path = srt_file_path
-
+        self.flag = False
+        self.message = None
         if translate:
             self.task = "translate"
 
@@ -143,6 +144,21 @@ class Client:
         else:
             print("[ERROR]: No host or port specified.")
             return
+        chat_port = 9091
+        chat_url = f"ws://{host}:{chat_port}"
+        self.chat_client = websocket.WebSocketApp(
+                chat_url,
+                on_open=lambda ws: self.on_chat_open(ws),
+                on_message=lambda ws, message: self.on_chat_message(ws, message),
+                on_error=lambda ws, error: self.on_error(ws, error),
+                on_close=lambda ws, close_status_code, close_msg: self.on_close(
+                    ws, close_status_code, close_msg
+                ),
+        )
+
+        self.chat_thread = threading.Thread(target=self.chat_client.run_forever)
+        self.chat_thread.setDaemon(True)
+        self.chat_thread.start()
 
         Client.INSTANCES[self.uid] = self
 
@@ -154,6 +170,13 @@ class Client:
         self.frames = b""
         self.transcript = []
         print("[INFO]: * recording")
+
+    def on_chat_open(self, ws):
+        print("[INFO]: Chat connection opened")
+        ws.send(json.dumps({"uid": self.uid, "message": "Hello"}))
+
+    def on_chat_message(self, ws, message):
+        print(message)
 
     def on_message(self, ws, message):
         """
@@ -224,6 +247,13 @@ class Client:
                     if not len(self.transcript) or float(seg['start']) >= float(self.transcript[-1]['end']):
                         self.transcript.append(seg)
 
+        if self.message is None or self.message != text[-1]:
+            self.message = text[-1]
+            self.flag = False
+        else:
+            if not self.flag:
+                self.chat_client.send(self.message)
+                self.flag = True
         # keep only last 3
         if len(text) > 3:
             text = text[-3:]
